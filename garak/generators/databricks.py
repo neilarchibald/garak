@@ -10,22 +10,49 @@ import os
 import re
 from typing import List
 import backoff
-from garak.generators import openai_utils as ou
 import asyncio
 import json
 import requests
 
 from garak.generators.base import Generator
 
+from databricks_genai_inference import ChatCompletion
+from databricks_genai_inference import Completion
 
-def databricks_endpoint(attackprompt,agentprompt,model_name):
+#/python3.11 -m garak --model_type databricks --model_name lakesense-chat --probes dan.Dan_11_0
+def db_chat_complete(model,prompt):
+    #print("\n\n",model,"\n\n")
+    response = ChatCompletion.create(model=model,
+                                    messages=[{"role": "system", "content": "You are a helpful assistant."},
+                                            {"role": "user","content": prompt}],
+                                    max_tokens=128)
+    print(response)
+    return response.message()
+
+def db_embedding():
+    pass
+
+def db_text_complete(model,prompt):
+    response = Completion.create(
+        model=model,
+        prompt=prompt,
+        max_tokens=128)
+    return response.text
+
+DISPATCH_TABLE = {
+    "chat_complete": db_chat_complete,
+    "embedding": db_embedding,
+    "text_complete": db_text_complete,
+}
+
+def databricks_endpoint(type,prompt,model_name):
     api_key = ""
     host = ""
     if not "dbutils" in globals(): 
-        api_key = os.getenv("DATABRICKS_API_KEY", default=None)
+        api_key = os.getenv("DATABRICKS_TOKEN", default=None)
         if api_key is None:
                 raise ValueError(
-                    'Put the DATABRICKS API key in the DATABRICKS_API_KEY environment variable (this was empty)\n \
+                    'Put the DATABRICKS API key in the DATABRICKS_TOKEN environment variable (this was empty)\n \
                     e.g.: export DATABRICKS_API_KEY="dapi123XXXXXXXXXXXX"'
                 )
         host = os.getenv("DATABRICKS_HOST", default=None)
@@ -36,40 +63,27 @@ def databricks_endpoint(attackprompt,agentprompt,model_name):
                 )
     else:
         host= dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None)
+        os.environ["DATABRICKS_HOST"] = host
         api_key = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None) 
-    headers = {
-        "Authorization": "Bearer " + api_key,
-    }
-    url = host+"/"+ "gateway/" + model_name + "/invocations"
- 
-    data = {
-        "prompt": attackprompt,
-        "temperature": 0,
-    }
-    
-    response = requests.post(url, headers=headers, json=data)
-    
-    #print("Status Code", response.status_code)
-    #print("content", response.text)
-    jrsp = json.loads(response.text)
-    #print("JSON Response ", json.dumps(json.loads(response.text), indent=4))
-    return jrsp["candidates"][0]["text"]
-
-AGENT_PROMPTS = {
-    "lakesense-code": "You are a Data Science assistant within a Databricks notebook. A notebook can have many code cells.\nProvide your answer in GFM markdown format and specify the language in code blocks.\nMake sure to include the programming language name at the start of the Markdown code blocks.\nDo not provide code results and do not show example outputs.\nOnly assist with programming related questions.\nUse \"/databricks-datasets\" as default root path, do not use \"/path/to/directory\".\nUse `/databricks-datasets/Rdatasets/data-001/csv/ggplot2/diamonds.csv` as default file if not specified.\nDo not do imports that you don't use.\nUse Spark Dataframes if not specified.\nNo need to create a spark object, session, import spark.\nUse brackets instead of backslash for new line continuation and split function argument on new lines.",
-    "lakesense-chat": "You are an AI documentation assistant within a Databricks workspace.\nYou only write links if they were previously written.\nYou use markdown where possible even in short replies.\nYou break long paragraphs into shorter ones.\nYou know the user is never reading documentation, because they are using the Databricks webapp.\nYou always consider that your prior knowledge may be wrong.\n\nInstructions:\n1. Write [21a81c06]\n2. If the fetched documentation does not directly answer the user question, do not write anything other than saying you couldn't find anything to answer their question and relevant info in the documentation, if any. Otherwise, form a short reply that uses only text written in the documentation.\n\n",
-    "mosaicml": ""
-}
+        os.environ["DATABRICKS_TOKEN"] = api_key 
+    return DISPATCH_TABLE[type](model_name,prompt)
 
 class DatabricksGenerator(Generator):
     def __init__(self, name, generations=10):
-        self.name = name
+        (self.name,self.type) = name.split("/")
         self.fullname = f"Databricks LLM {self.name}"
         self.generations = generations
 
-        super().__init__(name, generations=generations)
+        if self.type not in DISPATCH_TABLE:
+            raise ValueError(
+            f"No Databricks API defined for '{self.type}' in generators/databricks.py - please add one!"
+        )
+
+        print("[+] Testing model: %s of type %s" % (self.name,self.type))
+
+        super().__init__(self.name, generations=generations)
 
     def _call_model(self, prompt: str) -> str:
-        return databricks_endpoint(prompt,self.name)
+        return databricks_endpoint(self.type,prompt,self.name)
 
 default_class = "DatabricksGenerator"
