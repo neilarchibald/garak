@@ -33,7 +33,7 @@ class DBRAI(Probe):
         self.prompts = []
 
         # Create a SparkSession
-        spark = SparkSession.builder.getOrCreate()
+        # spark = SparkSession.builder.getOrCreate()
 
         # Read data from the Databricks table
         df = spark.read.table("prodsec_ai_corpus.default.chat_jailbreak")
