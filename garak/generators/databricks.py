@@ -26,7 +26,6 @@ def db_chat_complete(model,prompt):
                                     messages=[{"role": "system", "content": "You are a helpful assistant."},
                                             {"role": "user","content": prompt}],
                                     max_tokens=128)
-    print(response)
     return response.message()
 
 def db_embedding():
@@ -48,12 +47,18 @@ DISPATCH_TABLE = {
 def databricks_endpoint(type,prompt,model_name):
     api_key = ""
     host = ""
-    if not "dbutils" in globals(): 
+    try:
+        import dbutils
+        host= dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None)
+        os.environ["DATABRICKS_HOST"] = host
+        api_key = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None) 
+        os.environ["DATABRICKS_TOKEN"] = api_key 
+    except:
         api_key = os.getenv("DATABRICKS_TOKEN", default=None)
         if api_key is None:
                 raise ValueError(
                     'Put the DATABRICKS API key in the DATABRICKS_TOKEN environment variable (this was empty)\n \
-                    e.g.: export DATABRICKS_API_KEY="dapi123XXXXXXXXXXXX"'
+                    e.g.: export DATABRICKS_TOKEN="dapi123XXXXXXXXXXXX"'
                 )
         host = os.getenv("DATABRICKS_HOST", default=None)
         if host is None:
@@ -61,11 +66,6 @@ def databricks_endpoint(type,prompt,model_name):
                     'Put the DATABRICKS Workspace URL in the DATABRICKS_HOST environment variable (this was empty)\n \
                     e.g.: export DATABRICKS_HOST="https://mydatabrickshost.com"'
                 )
-    else:
-        host= dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiUrl().getOrElse(None)
-        os.environ["DATABRICKS_HOST"] = host
-        api_key = dbutils.notebook.entry_point.getDbutils().notebook().getContext().apiToken().getOrElse(None) 
-        os.environ["DATABRICKS_TOKEN"] = api_key 
     return DISPATCH_TABLE[type](model_name,prompt)
 
 class DatabricksGenerator(Generator):
